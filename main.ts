@@ -31,10 +31,11 @@ const connection = rpc.createMessageConnection(
     // Read from the server's stdout
     new rpc.StreamMessageReader(serverProcess.stdout),
     // Write to the server's stdin
-    new rpc.StreamMessageWriter(serverProcess.stdin)
+    new rpc.StreamMessageWriter(serverProcess.stdin),
 );
 
-async function initializeServer() {
+async function runClient() {
+    connection.listen();
     const initializeParams: InitializeParams = {
         processId: process.pid,
         rootUri: null,
@@ -45,47 +46,52 @@ async function initializeServer() {
     console.log('Sending "initialize" request...');
     const result = await connection.sendRequest<InitializeResult>(
         "initialize",
-        initializeParams
+        initializeParams,
     );
     // console.log('Received "initialize" response:', result);
+
+    // Start listening for messages
+    // send autocomplete request
+    const autocompleteParams = {
+        textDocument: {
+            uri: "file:///path/to/document",
+        },
+        position: {
+            line: 0,
+            character: 0,
+        },
+    };
+    const autocompleteResult = await connection.sendRequest(
+        "textDocument/completion",
+        autocompleteParams,
+    );
+    // console.log("Received autocomplete result:", autocompleteResult);
+    const content =
+        "import stuff from 'module';\n\nfn example() {\n    // Example function\n}\n";
+    const didChangeContentParams = {
+        textDocument: {
+            uri: "file:///path/to/document",
+            version: 1, // Increment this version for each change
+        },
+        contentChanges: [
+            {
+                text: content, // The new content of the document
+            },
+        ],
+    };
+    // send didChangeContent notification
+    console.log("Sending 'didChangeContent' notification...");
+    connection
+        .sendNotification("textDocument/didChange", didChangeContentParams)
+        .then((result) => {
+            console.log(
+                "Received 'didChangeContent' notification response:\n"
+            );
+        });
+    // show diagnostics sent by server in response to didChangeContent notification
+    connection.onNotification("textDocument/publishDiagnostics", (params) => {
+        console.log("Received diagnostics from server:", params);
+    });
 }
 
-// Listen for notifications from the server (e.g., diagnostics)
-connection.onNotification("textDocument/publishDiagnostics", (params) => {
-    console.log("Received diagnostics:", params);
-});
-
-// Start listening for messages
-connection.listen();
-// send autocomplete request
-const autocompleteParams = {
-    textDocument: {
-        uri: "file:///path/to/document",
-    },
-    position: {
-        line: 0,
-        character: 0,
-    },
-};
-const autocompleteResult = await connection.sendRequest("textDocument/completion", autocompleteParams);
-// console.log("Received autocomplete result:", autocompleteResult);
-const content = "import stuff from 'module';\n\nfn example() {\n    // Example function\n}\n";
-const didChangeContentParams = {
-    textDocument: {
-        uri: "file:///path/to/document",
-        version: 1, // Increment this version for each change
-    },
-    contentChanges: [
-        {
-            text: content, // The new content of the document
-        },
-    ],
-};
-console.log("Sending 'didChangeContent' notification...");
-connection.sendNotification("textDocument/didChange", didChangeContentParams).then((result) => {
-    console.log("Received 'didChangeContent' notification response:\n", result);
-});
-
-
-// Initialize the server
-initializeServer();
+runClient().catch(console.error);

@@ -30,6 +30,7 @@ private:
     void processRequest(const json &request);
     void sendResponse(const json &response);
     void parseMessage(const std::string &jsonContent);
+    void sendWindowMessage(const std::string &message);
 
     // Request handlers
     void onInitialize(const json &request);
@@ -45,6 +46,7 @@ private:
 
     enum class LspMethod {
         Initialize,
+        Initialized,
         TextDocumentDidOpen,
         TextDocumentDidChange,
         TextDocumentDidSave,
@@ -56,6 +58,7 @@ private:
     };
     std::unordered_map<std::string_view, LspMethod> LspMethods = {
             {"initialize", LspMethod::Initialize},
+            {"initialized", LspMethod::Initialized},
             {"textDocument/didOpen", LspMethod::TextDocumentDidOpen},
             {"textDocument/didChange", LspMethod::TextDocumentDidChange},
             {"textDocument/didSave", LspMethod::TextDocumentDidSave},

@@ -20,7 +20,7 @@ size_t positionToOffset(const std::string &content, int line, int character) {
     return content.length(); // Return end of file if not found
 }
 
-std::string getWordAt(const std::string &content, int line, int character) {
+std::string_view getWordAt(const std::string &content, int line, int character) {
     if (content.empty())
         return "";
 
@@ -34,7 +34,8 @@ std::string getWordAt(const std::string &content, int line, int character) {
 
     if (start >= end)
         return "";
-    return content.substr(start, end - start);
+    // ;
+    return std::string_view(content.c_str() + start, end - start);
 }
 
 namespace lsp {
@@ -86,41 +87,53 @@ void Server::parseMessage(const std::string &jsonContent) {
             std::string method = request["method"];
 
             std::cerr << "[Received Request] " << method << std::endl;
-
-            switch (LspMethods[method]) {
-                case LspMethod::Initialize:
-                    onInitialize(request);
-                    break;
-                case LspMethod::TextDocumentDidOpen:
-                    onDidOpen(request);
-                    break;
-                case LspMethod::TextDocumentDidChange:
-                    onDidChangeContent(request);
-                    break;
-                case LspMethod::TextDocumentDidSave:
-                    std::cerr << "[Did Save] " << request["params"]["textDocument"]["uri"] << std::endl;
-                    break;
-                case LspMethod::TextDocumentCompletion:
-                    onCompletion(request);
-                    break;
-                case LspMethod::CompletionItemResolve:
-                    onCompletionResolve(request);
-                    break;
-                case LspMethod::TextDocumentHover:
-                    onHover(request);
-                    std::cerr << "[Hover] " << request["params"]["textDocument"]["uri"] << std::endl;
-                    break;
-                case LspMethod::SetTrace:
-                    onSetTrace(request);
-                    break;
-                default:
-                    json errorResponse = {{"jsonrpc", "2.0"},
-                                          {"id", 1},
-                                          {"result", nullptr},
-                                          {"error",
-                                           {{"code", -32601}, // Method not supported
-                                            {"message", "Method not found: " + method}}}};
-                    sendResponse(errorResponse);
+            
+            if (!LspMethods.contains(method)) {
+                json errorResponse = {{"jsonrpc", "2.0"},
+                                      {"id", 1},
+                                      {"error",
+                                       {{"code", -32601},
+                                        {"message", "Method not found: " + method}}}};
+                sendResponse(errorResponse);
+            } else {
+                switch (LspMethods[method]) {
+                    case LspMethod::Initialize:
+                        onInitialize(request);
+                        break;
+                    case LspMethod::Initialized:
+                        std::cerr << "[Initialized] Client has completed initialization." << std::endl;
+                        break;
+                    case LspMethod::TextDocumentDidOpen:
+                        onDidOpen(request);
+                        break;
+                    case LspMethod::TextDocumentDidChange:
+                        onDidChangeContent(request);
+                        break;
+                    case LspMethod::TextDocumentDidSave:
+                        std::cerr << "[Did Save] " << request["params"]["textDocument"]["uri"] << std::endl;
+                        break;
+                    case LspMethod::TextDocumentCompletion:
+                        onCompletion(request);
+                        break;
+                    case LspMethod::CompletionItemResolve:
+                        onCompletionResolve(request);
+                        break;
+                    case LspMethod::TextDocumentHover:
+                        onHover(request);
+                        std::cerr << "[Hover] " << request["params"]["textDocument"]["uri"] << std::endl;
+                        break;
+                    case LspMethod::SetTrace:
+                        onSetTrace(request);
+                        break;
+                    default:
+                        std::cerr << "Hit default case" << std::endl;
+                        json errorResponse = {{"jsonrpc", "2.0"},
+                                              {"id", 1},
+                                              {"error",
+                                               {{"code", -32601},
+                                                {"message", "Method not found: " + method}}}};
+                        sendResponse(errorResponse);
+                }
             }
         }
     } catch (const json::parse_error &e) {
@@ -136,6 +149,15 @@ void Server::sendResponse(const json &response) {
     // std::cerr << "[Sent Response] " << response.dump(4) << std::endl;
 }
 
+void Server::sendWindowMessage(const std::string &message) {
+    json response = {{"jsonrpc", "2.0"},
+                     {"method", "window/showMessage"},
+                     {"params",
+                      {{"type", 3}, // Information message
+                       {"message", message}}}};
+    sendResponse(response);
+}
+
 void Server::onInitialize(const json &request) {
     // Handle the "initialize" request
     json response = {{"jsonrpc", "2.0"},
@@ -148,6 +170,7 @@ void Server::onInitialize(const json &request) {
                          {"diagnosticsProvider", {{"interFileDependencies", true}, {"workspaceDiagnostics", true}}},
                          {"hoverProvider", true}}}}}};
     sendResponse(response);
+    sendWindowMessage("Hello from LSP");
 }
 
 void Server::onDidOpen(const json &request) {
@@ -341,11 +364,11 @@ void Server::onHover(const json &request) {
     int character = request["params"]["position"]["character"];
     std::string content = getDocument(uri);
 
-    std::string word = getWordAt(content, line, character);
+    std::string_view word = getWordAt(content, line, character);
 
     std::string hoverText = "No info available";
     if (!word.empty()) {
-        hoverText = "Hover info for `" + word + "`";
+        hoverText = "Hover info for `" + std::string(word) + "`";
     }
 
     json response = {{"jsonrpc", "2.0"},
