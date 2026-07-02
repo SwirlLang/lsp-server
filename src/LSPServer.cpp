@@ -306,7 +306,7 @@ void Server::validateDocument(const std::string &uri) {
 
     // Find the import statements and check if they don't provide any
     // package
-    std::regex import_pattern(R"(\bimport(?! \w))");
+    std::regex import_pattern(R"(\bimport (?!\w))");
     std::sregex_iterator start(content.begin(), content.end(), import_pattern);
     std::sregex_iterator end;
 
