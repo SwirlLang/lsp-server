@@ -2,41 +2,7 @@
 #include <iostream>
 #include <regex>
 #include <utility>
-
-size_t positionToOffset(const std::string &content, int line, int character) {
-    int currentLine = 0;
-    int currentChar = 0;
-    for (size_t i = 0; i < content.length(); ++i) {
-        if (currentLine == line && currentChar == character) {
-            return i;
-        }
-        if (content[i] == '\n') {
-            currentLine++;
-            currentChar = 0;
-        } else {
-            currentChar++;
-        }
-    }
-    return content.length(); // Return end of file if not found
-}
-
-std::string_view getWordAt(const std::string &content, int line, int character) {
-    if (content.empty())
-        return "";
-
-    size_t offset = positionToOffset(content, line, character);
-
-    size_t start = offset, end = offset;
-    while (start > 0 && std::isalnum(content[start - 1]))
-        start--;
-    while (end < content.size() && std::isalnum(content[end]))
-        end++;
-
-    if (start >= end)
-        return "";
-    // ;
-    return std::string_view(content.c_str() + start, end - start);
-}
+#include "utils.h"
 
 namespace lsp {
 
@@ -87,13 +53,11 @@ void Server::parseMessage(const std::string &jsonContent) {
             std::string method = request["method"];
 
             std::cerr << "[Received Request] " << method << std::endl;
-            
+
             if (!LspMethods.contains(method)) {
                 json errorResponse = {{"jsonrpc", "2.0"},
                                       {"id", 1},
-                                      {"error",
-                                       {{"code", -32601},
-                                        {"message", "Method not found: " + method}}}};
+                                      {"error", {{"code", -32601}, {"message", "Method not found: " + method}}}};
                 sendResponse(errorResponse);
             } else {
                 switch (LspMethods[method]) {
@@ -127,11 +91,10 @@ void Server::parseMessage(const std::string &jsonContent) {
                         break;
                     default:
                         std::cerr << "Hit default case" << std::endl;
-                        json errorResponse = {{"jsonrpc", "2.0"},
-                                              {"id", 1},
-                                              {"error",
-                                               {{"code", -32601},
-                                                {"message", "Method not found: " + method}}}};
+                        json errorResponse = {
+                                {"jsonrpc", "2.0"},
+                                {"id", 1},
+                                {"error", {{"code", -32601}, {"message", "Method not found: " + method}}}};
                         sendResponse(errorResponse);
                 }
             }
@@ -341,21 +304,6 @@ void Server::validateDocument(const std::string &uri) {
     std::cerr << "[Diagnostics] Found " << diagnostics.size() << " issues in " << uri << std::endl;
 }
 
-std::pair<int, int> Server::calculatePosition(const std::string &content, size_t offset) {
-    int line = 0;
-    int character = 0;
-
-    for (size_t i = 0; i < offset && i < content.length(); ++i) {
-        if (content[i] == '\n') {
-            line++;
-            character = 0;
-        } else {
-            character++;
-        }
-    }
-
-    return {line, character};
-}
 
 void Server::onHover(const json &request) {
     // Handle the "hover" request

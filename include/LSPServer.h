@@ -42,8 +42,6 @@ private:
     void onSetTrace(const json &request);
 
     void validateDocument(const std::string &uri);
-    std::pair<int, int> calculatePosition(const std::string &content, size_t offset);
-
     enum class LspMethod {
         Initialize,
         Initialized,
