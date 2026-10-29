@@ -4,19 +4,12 @@ Next Gen Language Server for Swirl written in C++. Currently only has dummy impl
 
 ## Prerequisites
 
--   A C++ compiler (e.g., g++, clang++)
--   CMake (3.10 or higher)
--   A JS runtime and package manager (We use [Bun](https://bun.sh) here)
+-   A C++26-capable compiler (e.g., g++, clang++)
+-   CMake (3.30 or higher)
 
 ## Getting Started
 
-### 1. Install Client Dependencies
-
-```bash
-bun install
-```
-
-### 2. Build the Language Server
+### Build the Language Server
 
 This project uses CMake to build the C++ server. The executable will be created at `build/swirl_lsp`.
 
@@ -28,16 +21,13 @@ cmake -B build -S .
 cmake --build build
 ```
 
-### 3. Run
+### Run
 
-The `main.ts` script acts as a client that launches and communicates with the compiled server.
+The server speaks LSP over stdio (JSON-RPC with `Content-Length` framing). Launch `build/swirl_lsp` with stdin/stdout connected to your LSP client; logs are written to stderr.
 
-```bash
-bun run main.ts
-```
+### Integrate with VSCode
 
-### 4. Integrate with VSCode
-To use this language server in VSCode, you can set up a simple extension or use the `vscode-languageclient` library to connect to the server executable and communicate via stdio.
+To use this language server in VSCode, set up an extension (or use the `vscode-languageclient` library) that spawns the server executable and communicates with it over stdio.
 
 ## Currently Supported Methods
 
@@ -50,7 +40,3 @@ To use this language server in VSCode, you can set up a simple extension or use 
 -   textDocument/hover
 -   textDocument/publishDiagnostics
 -   $/setTrace
-
----
-
-This project was created using `bun init` in bun v1.1.42. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
