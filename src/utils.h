@@ -1,6 +1,9 @@
-#include <cctype>
+#pragma once
+
+#include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
 
 inline size_t positionToOffset(const std::string &content, int line, int character) {
     int currentLine = 0;
@@ -33,7 +36,6 @@ inline std::string_view getWordAt(const std::string &content, int line, int char
 
     if (start >= end)
         return "";
-    // ;
     return std::string_view(content.c_str() + start, end - start);
 }
 

@@ -1,7 +1,10 @@
 #pragma once
+
 #include <iosfwd>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+
 #include "json.hpp"
 
 using json = nlohmann::json;
@@ -16,8 +19,40 @@ public:
     ~Server();
     void run(std::istream &in, std::ostream &out);
 
+    /// 0 when the session ended after a `shutdown`, 1 otherwise.
+    int exitCode() const;
+
 private:
-    // Document manger: URI: content
+    enum class LspMethod {
+        Initialize,
+        Initialized,
+        Shutdown,
+        Exit,
+        TextDocumentDidOpen,
+        TextDocumentDidChange,
+        TextDocumentDidSave,
+        TextDocumentDidClose,
+        TextDocumentCompletion,
+        CompletionItemResolve,
+        TextDocumentHover,
+        SetTrace
+    };
+
+    inline static const std::unordered_map<std::string_view, LspMethod> LspMethods = {
+            {"initialize", LspMethod::Initialize},
+            {"initialized", LspMethod::Initialized},
+            {"shutdown", LspMethod::Shutdown},
+            {"exit", LspMethod::Exit},
+            {"textDocument/didOpen", LspMethod::TextDocumentDidOpen},
+            {"textDocument/didChange", LspMethod::TextDocumentDidChange},
+            {"textDocument/didSave", LspMethod::TextDocumentDidSave},
+            {"textDocument/didClose", LspMethod::TextDocumentDidClose},
+            {"textDocument/completion", LspMethod::TextDocumentCompletion},
+            {"completionItem/resolve", LspMethod::CompletionItemResolve},
+            {"textDocument/hover", LspMethod::TextDocumentHover},
+            {"$/setTrace", LspMethod::SetTrace}};
+
+    // Document manager: URI -> content
     std::unordered_map<std::string, std::string> documents;
 
     // Track document version
@@ -32,44 +67,30 @@ private:
     // Active transport for the duration of run(); null outside it.
     Transport *m_Transport = nullptr;
 
-    // helper functions
-    void processRequest(const json &request);
+    bool m_ShutdownRequested = false;
+    bool m_ExitRequested = false;
+
+    // Transport helpers
     void sendResponse(const json &response);
+    void sendResult(const json &id, const json &result);
+    void sendError(const json &id, int code, const std::string &message);
+
+    // Dispatch
     void parseMessage(const std::string &jsonContent);
-    void sendWindowMessage(const std::string &message);
+    void dispatch(LspMethod method, const json &message);
+    static bool isRequestMethod(LspMethod method);
 
     // Request handlers
     void onInitialize(const json &request);
-    void onDidOpen(const json &request);
-    void onDidChangeContent(const json &request);
+    void onDidOpen(const json &message);
+    void onDidChangeContent(const json &message);
+    void onDidSave(const json &message);
+    void onDidClose(const json &message);
     void onCompletion(const json &request);
     void onCompletionResolve(const json &request);
     void onHover(const json &request);
-    void onSetTrace(const json &request);
+    void onSetTrace(const json &message);
 
     void validateDocument(const std::string &uri);
-    enum class LspMethod {
-        Initialize,
-        Initialized,
-        TextDocumentDidOpen,
-        TextDocumentDidChange,
-        TextDocumentDidSave,
-        TextDocumentDidClose,
-        TextDocumentCompletion,
-        CompletionItemResolve,
-        TextDocumentHover,
-        SetTrace
-    };
-    std::unordered_map<std::string_view, LspMethod> LspMethods = {
-            {"initialize", LspMethod::Initialize},
-            {"initialized", LspMethod::Initialized},
-            {"textDocument/didOpen", LspMethod::TextDocumentDidOpen},
-            {"textDocument/didChange", LspMethod::TextDocumentDidChange},
-            {"textDocument/didSave", LspMethod::TextDocumentDidSave},
-            {"textDocument/didClose", LspMethod::TextDocumentDidClose},
-            {"textDocument/completion", LspMethod::TextDocumentCompletion},
-            {"completionItem/resolve", LspMethod::CompletionItemResolve},
-            {"textDocument/hover", LspMethod::TextDocumentHover},
-            {"$/setTrace", LspMethod::SetTrace}};
 };
 } // namespace lsp

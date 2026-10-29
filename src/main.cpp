@@ -5,5 +5,5 @@
 int main() {
     lsp::Server server;
     server.run(std::cin, std::cout);
-    return 0;
+    return server.exitCode();
 }
