@@ -2,6 +2,7 @@
 #include <iostream>
 #include <regex>
 #include <utility>
+#include "Transport.h"
 #include "utils.h"
 
 namespace lsp {
@@ -12,38 +13,14 @@ Server::~Server() {
     // std::cerr << "LSP Server shutting down." << std::endl;
 }
 
-void Server::run() {
-    // Start the server and listen for incoming requests
+void Server::run(std::istream &in, std::ostream &out) {
+    Transport transport(in, out);
+    m_Transport = &transport;
 
-    while (true) {
-        // Read the "Content-Length" header
-        std::string contentLengthHeader;
-        std::getline(std::cin, contentLengthHeader);
-        if (contentLengthHeader.empty()) {
-            // End of stream or client closed connection
-            break;
-        }
+    while (const auto message = transport.read())
+        parseMessage(*message);
 
-        int contentLength = 0;
-        try {
-            contentLength = std::stoi(contentLengthHeader.substr(16));
-        } catch (const std::exception &e) {
-            // Log an error
-            continue;
-        }
-
-        // Read the mandatory blank line after the header
-        std::string blankLine;
-        std::getline(std::cin, blankLine);
-
-        // Read the JSON content itself
-        std::vector<char> jsonBuffer(contentLength);
-        std::cin.read(jsonBuffer.data(), contentLength);
-        std::string jsonContent(jsonBuffer.begin(), jsonBuffer.end());
-
-        // Parse and process the message
-        parseMessage(jsonContent);
-    }
+    m_Transport = nullptr;
 }
 
 void Server::parseMessage(const std::string &jsonContent) {
@@ -106,10 +83,11 @@ void Server::parseMessage(const std::string &jsonContent) {
 }
 
 void Server::sendResponse(const json &response) {
-    std::string responseStr = response.dump();
-    std::cout << "Content-Length: " << responseStr.size() << "\r\n\r\n" << responseStr;
-    std::cout.flush();
-    // std::cerr << "[Sent Response] " << response.dump(4) << std::endl;
+    if (m_Transport == nullptr) {
+        std::cerr << "[Server] Cannot send a response without an active transport" << std::endl;
+        return;
+    }
+    m_Transport->write(response.dump());
 }
 
 void Server::sendWindowMessage(const std::string &message) {

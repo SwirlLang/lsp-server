@@ -1,4 +1,5 @@
 #pragma once
+#include <iosfwd>
 #include <string>
 #include <unordered_map>
 #include "json.hpp"
@@ -7,11 +8,13 @@ using json = nlohmann::json;
 
 namespace lsp {
 
+class Transport;
+
 class Server {
 public:
     Server();
     ~Server();
-    void run();
+    void run(std::istream &in, std::ostream &out);
 
 private:
     // Document manger: URI: content
@@ -25,6 +28,9 @@ private:
     void removeDocument(const std::string &uri);
     std::string getDocument(const std::string &uri);
     bool hasDocument(const std::string &uri);
+
+    // Active transport for the duration of run(); null outside it.
+    Transport *m_Transport = nullptr;
 
     // helper functions
     void processRequest(const json &request);

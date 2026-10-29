@@ -15,6 +15,7 @@ endif()
 # core library
 add_library(swirl_lsp_core STATIC
     src/LSPServer.cpp
+    src/Transport.cpp
 )
 target_include_directories(swirl_lsp_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
