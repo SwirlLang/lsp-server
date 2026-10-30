@@ -14,6 +14,8 @@ endif()
 
 # core library
 add_library(swirl_lsp_core STATIC
+    src/DocumentStore.cpp
+    src/DummyLanguageService.cpp
     src/LSPServer.cpp
     src/Transport.cpp
 )

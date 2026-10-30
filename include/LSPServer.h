@@ -1,16 +1,19 @@
 #pragma once
 
 #include <iosfwd>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 
+#include "DocumentStore.h"
 #include "json.hpp"
 
 using json = nlohmann::json;
 
 namespace lsp {
 
+class LanguageService;
 class Transport;
 
 class Server {
@@ -52,17 +55,8 @@ private:
             {"textDocument/hover", LspMethod::TextDocumentHover},
             {"$/setTrace", LspMethod::SetTrace}};
 
-    // Document manager: URI -> content
-    std::unordered_map<std::string, std::string> documents;
-
-    // Track document version
-    std::unordered_map<std::string, int> document_versions;
-
-    void storeDocument(const std::string &uri, const std::string &content, int version = 0);
-    void updateDocument(const std::string &uri, const std::string &newContent, int version);
-    void removeDocument(const std::string &uri);
-    std::string getDocument(const std::string &uri);
-    bool hasDocument(const std::string &uri);
+    DocumentStore m_Documents;
+    std::unique_ptr<LanguageService> m_LanguageService;
 
     // Active transport for the duration of run(); null outside it.
     Transport *m_Transport = nullptr;

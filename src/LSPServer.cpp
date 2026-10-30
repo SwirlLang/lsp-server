@@ -1,11 +1,13 @@
 #include "LSPServer.h"
 
 #include <iostream>
-#include <regex>
+#include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "DummyLanguageService.h"
 #include "Transport.h"
-#include "utils.h"
 
 namespace lsp {
 namespace {
@@ -14,9 +16,70 @@ std::string documentUri(const json &message) {
     return message.at("params").at("textDocument").at("uri").get<std::string>();
 }
 
+json toJson(Position position) { return {{"line", position.line}, {"character", position.character}}; }
+
+json toJson(const Range &range) { return {{"start", toJson(range.start)}, {"end", toJson(range.end)}}; }
+
+json toJson(const Diagnostic &diagnostic) {
+    return {{"severity", diagnostic.severity},
+            {"range", toJson(diagnostic.range)},
+            {"message", diagnostic.message},
+            {"source", diagnostic.source}};
+}
+
+json toJson(const HoverInfo &hover) {
+    json result = {{"contents", {{"kind", "markdown"}, {"value", hover.markdown}}}};
+    if (hover.range)
+        result["range"] = toJson(*hover.range);
+    return result;
+}
+
+json toJson(const CompletionItem &item) {
+    json result = {{"label", item.label}, {"kind", item.kind}};
+    if (item.sortText)
+        result["sortText"] = *item.sortText;
+    if (item.detail)
+        result["detail"] = *item.detail;
+    if (item.documentation)
+        result["documentation"] = *item.documentation;
+    return result;
+}
+
+CompletionItem completionItemFromJson(const json &value) {
+    CompletionItem item;
+    item.label = value.at("label").get<std::string>();
+    item.kind = value.value("kind", 1);
+
+    if (const auto it = value.find("sortText"); it != value.end() && it->is_string())
+        item.sortText = it->get<std::string>();
+    if (const auto it = value.find("detail"); it != value.end() && it->is_string())
+        item.detail = it->get<std::string>();
+    if (const auto it = value.find("documentation"); it != value.end() && it->is_string())
+        item.documentation = it->get<std::string>();
+
+    return item;
+}
+
+std::optional<Range> parseRange(const json &value) {
+    if (!value.is_object())
+        return std::nullopt;
+
+    const json &start = value.at("start");
+    const json &end = value.at("end");
+
+    return Range{{start.at("line").get<int>(), start.at("character").get<int>()},
+                 {end.at("line").get<int>(), end.at("character").get<int>()}};
+}
+
+Position parsePosition(const json &value) {
+    return {value.at("line").get<int>(), value.at("character").get<int>()};
+}
+
 } // namespace
 
-Server::Server() { std::cerr << "LSP Server initialized" << std::endl; }
+Server::Server() : m_LanguageService(std::make_unique<DummyLanguageService>()) {
+    std::cerr << "LSP Server initialized" << std::endl;
+}
 
 Server::~Server() = default;
 
@@ -198,13 +261,22 @@ void Server::onInitialize(const json &request) {
 void Server::onDidOpen(const json &message) {
     const json &textDocument = message.at("params").at("textDocument");
     const std::string uri = textDocument.at("uri").get<std::string>();
-    const std::string text = textDocument.at("text").get<std::string>();
-    const int version = textDocument.value("version", 0);
 
-    storeDocument(uri, text, version);
+    DocumentStore::Document document;
+    document.uri = uri;
+    document.languageId = textDocument.value("languageId", std::string());
+    document.text = textDocument.at("text").get<std::string>();
+    document.version = textDocument.value("version", 0);
+
+    const std::size_t length = document.text.length();
+    m_Documents.open(std::move(document));
+
+    if (const DocumentStore::Document *stored = m_Documents.find(uri))
+        m_LanguageService->didOpen(*stored);
+
     validateDocument(uri);
 
-    std::cerr << "[Did Open] " << uri << " (length: " << text.length() << ")" << std::endl;
+    std::cerr << "[Did Open] " << uri << " (length: " << length << ")" << std::endl;
 }
 
 void Server::onDidChangeContent(const json &message) {
@@ -212,21 +284,23 @@ void Server::onDidChangeContent(const json &message) {
     const std::string uri = params.at("textDocument").at("uri").get<std::string>();
     const int version = params.at("textDocument").value("version", -1);
 
-    if (!hasDocument(uri)) {
+    if (!m_Documents.contains(uri)) {
         std::cerr << "[Did Change] Ignoring unknown document: " << uri << std::endl;
         return;
     }
 
     for (const auto &change: params.at("contentChanges")) {
         const std::string text = change.at("text").get<std::string>();
+        const std::optional<Range> range = change.contains("range") ? parseRange(change.at("range")) : std::nullopt;
 
-        if (change.contains("range")) {
-            std::cerr << "[Did Change] Incremental updates are not implemented yet" << std::endl;
-            continue;
+        if (!m_Documents.applyChange(uri, range, text, version)) {
+            std::cerr << "[Did Change] Ignoring unknown document: " << uri << std::endl;
+            return;
         }
-
-        updateDocument(uri, text, version);
     }
+
+    if (const DocumentStore::Document *stored = m_Documents.find(uri))
+        m_LanguageService->didChange(*stored);
 
     validateDocument(uri);
 
@@ -237,69 +311,52 @@ void Server::onDidSave(const json &message) {
     std::cerr << "[Did Save] " << documentUri(message) << std::endl;
 }
 
-void Server::onDidClose(const json &message) { removeDocument(documentUri(message)); }
+void Server::onDidClose(const json &message) {
+    const std::string uri = documentUri(message);
+    m_LanguageService->didClose(uri);
+    if (!m_Documents.close(uri))
+        std::cerr << "[Did Close] Unknown document: " << uri << std::endl;
+}
 
 void Server::onCompletion(const json &request) {
-    json response = {{"jsonrpc", "2.0"},
-                     {"id", request.at("id")},
-                     {"result",
-                      {{"isIncomplete", false},
-                       {"items",
-                        {{{"label", "Hello"},
-                          {"kind", 1}, // Text
-                          {"sortText", "0001"},
-                          {"detail", "Hello from swirl C++ lsp server"},
-                          {"documentation", "Text completion from swirl LSP server"}},
-                         {{"label", "from"},
-                          {"kind", 2}, // Method
-                          {"sortText", "0002"},
-                          {"detail", "from swirl C++ lsp server"},
-                          {"documentation", "Method completion from swirl LSP server"}},
-                         {{"label", "swirl"},
-                          {"kind", 3}, // Function
-                          {"sortText", "0003"},
-                          {"detail", "swirl C++ lsp server"},
-                          {"documentation", "Function completion from swirl LSP server"}},
-                         {{"label", "C++"},
-                          {"kind", 6}, // Class
-                          {"sortText", "0004"},
-                          {"detail", "C++ lsp server"},
-                          {"documentation", "Class completion from swirl LSP server"}},
-                         {{"label", "lsp"},
-                          {"kind", 7}, // Interface
-                          {"sortText", "0005"},
-                          {"detail", "lsp server"},
-                          {"documentation", "Interface completion from swirl LSP server"}},
-                         {{"label", "server"},
-                          {"kind", 9}, // Module
-                          {"sortText", "0006"},
-                          {"detail", "server"},
-                          {"documentation", "Module completion from swirl LSP server"}}}}}}};
-    sendResponse(response);
+    const std::string uri = documentUri(request);
+    const Position position = parsePosition(request.at("params").at("position"));
+
+    const DocumentStore::Document *document = m_Documents.find(uri);
+    if (document == nullptr) {
+        sendResult(request.at("id"), nullptr);
+        return;
+    }
+
+    json items = json::array();
+    for (const CompletionItem &item: m_LanguageService->completion(*document, position))
+        items.push_back(toJson(item));
+
+    sendResult(request.at("id"), {{"isIncomplete", false}, {"items", items}});
 }
 
 void Server::onCompletionResolve(const json &request) {
-    json result = request.at("params");
-    if (result.contains("sortText"))
-        result.erase("sortText");
-
-    sendResult(request.at("id"), result);
+    const std::optional<CompletionItem> resolved = m_LanguageService->resolve(completionItemFromJson(request.at("params")));
+    sendResult(request.at("id"), resolved ? toJson(*resolved) : request.at("params"));
 }
 
 void Server::onHover(const json &request) {
     const std::string uri = documentUri(request);
-    const json &position = request.at("params").at("position");
-    const int line = position.at("line").get<int>();
-    const int character = position.at("character").get<int>();
+    const Position position = parsePosition(request.at("params").at("position"));
 
-    const std::string content = getDocument(uri);
-    const std::string_view word = getWordAt(content, line, character);
+    const DocumentStore::Document *document = m_Documents.find(uri);
+    if (document == nullptr) {
+        sendResult(request.at("id"), nullptr);
+        return;
+    }
 
-    std::string hoverText = "No info available";
-    if (!word.empty())
-        hoverText = "Hover info for `" + std::string(word) + "`";
+    const std::optional<HoverInfo> hover = m_LanguageService->hover(*document, position);
+    if (!hover) {
+        sendResult(request.at("id"), nullptr);
+        return;
+    }
 
-    sendResult(request.at("id"), {{"contents", {{"kind", "markdown"}, {"value", hoverText}}}});
+    sendResult(request.at("id"), toJson(*hover));
 }
 
 void Server::onSetTrace(const json &message) {
@@ -307,73 +364,23 @@ void Server::onSetTrace(const json &message) {
     std::cerr << "[Set Trace] " << params.value("value", "off") << std::endl;
 }
 
-void Server::storeDocument(const std::string &uri, const std::string &content, int version) {
-    documents[uri] = content;
-    document_versions[uri] = version;
-    std::cerr << "[Document Stored] " << uri << " (version: " << version << ")" << std::endl;
-}
-
-void Server::updateDocument(const std::string &uri, const std::string &newContent, int version) {
-    if (!hasDocument(uri))
-        return;
-
-    documents[uri] = newContent;
-    document_versions[uri] = version;
-    std::cerr << "[Document Updated] " << uri << " (version: " << version << ")" << std::endl;
-}
-
-void Server::removeDocument(const std::string &uri) {
-    documents.erase(uri);
-    document_versions.erase(uri);
-    std::cerr << "[Document Removed] " << uri << std::endl;
-}
-
-std::string Server::getDocument(const std::string &uri) {
-    const auto entry = documents.find(uri);
-    return entry == documents.end() ? std::string() : entry->second;
-}
-
-bool Server::hasDocument(const std::string &uri) { return documents.contains(uri); }
-
 void Server::validateDocument(const std::string &uri) {
-    if (!hasDocument(uri))
+    const DocumentStore::Document *document = m_Documents.find(uri);
+    if (document == nullptr)
         return;
 
-    const std::string content = getDocument(uri);
-
-    // Find the import statements and check if they don't provide any
-    // package
-    std::regex importPattern(R"(\bimport (?!\w))");
-    std::sregex_iterator start(content.begin(), content.end(), importPattern);
-    std::sregex_iterator end;
+    const std::vector<Diagnostic> reported = m_LanguageService->diagnostics(*document);
 
     json diagnostics = json::array();
-
-    for (std::sregex_iterator i = start; i != end; ++i) {
-        const std::smatch match = *i;
-        const size_t matchPos = match.position();
-        const size_t matchLength = match.length();
-
-        // Calculate line and character positions
-        const auto [startLine, startCharacter] = calculatePosition(content, matchPos);
-        const auto [endLine, endCharacter] = calculatePosition(content, matchPos + matchLength);
-
-        json diagnostic = {{"severity", 1}, // Error severity
-                           {"range",
-                            {{"start", {{"line", startLine}, {"character", startCharacter}}},
-                             {"end", {{"line", endLine}, {"character", endCharacter}}}}},
-                           {"message", "No package name provided"},
-                           {"source", "Swirl"}};
-
-        diagnostics.push_back(diagnostic);
-    }
+    for (const Diagnostic &diagnostic: reported)
+        diagnostics.push_back(toJson(diagnostic));
 
     json diagnosticsNotification = {{"jsonrpc", "2.0"},
                                     {"method", "textDocument/publishDiagnostics"},
                                     {"params", {{"uri", uri}, {"diagnostics", diagnostics}}}};
     sendResponse(diagnosticsNotification);
 
-    std::cerr << "[Diagnostics] Found " << diagnostics.size() << " issues in " << uri << std::endl;
+    std::cerr << "[Diagnostics] Found " << reported.size() << " issues in " << uri << std::endl;
 }
 
 } // namespace lsp
